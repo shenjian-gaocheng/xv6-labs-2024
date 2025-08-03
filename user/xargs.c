@@ -21,7 +21,8 @@ read_line(char* buf,int max){
     return i>0;
 }
 
-void parse_line(char* line,char** argv,int* agrc){
+void
+parse_line(char* line,char** argv,int* agrc){
     char* p=line;
     while(*p!=0){
         //skip space
