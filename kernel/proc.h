@@ -104,4 +104,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // my change
+  uint trace_mask;     // 新增：位掩码，按位选择要追踪的 syscall
 };

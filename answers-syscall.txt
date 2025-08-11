@@ -1,0 +1,15 @@
+﻿usertrap
+7 syscall number
+user mode
+lw	a3,0(zero) a3
+“确认错误装配指令是否相同？”
+是的，lw a3,0(zero) 与你在 kernel.asm/GDB 中的断点位置一致。
+
+“内核为什么会崩溃？”
+在 S 模式执行 lw a3,0(zero) 访问 VA=0，该地址未映射 → 触发 Load page fault → kerneltrap() panic。
+
+“地址 0 是否映射到内核地址空间？”
+**不映射。**为捕获空指针，零页在内核页表中留空。
+
+“scause 的值是否证实了这一点？”
+是的，scause=0xd（Load page fault）+ stval=0x0（故障地址 0）直接证明了“访问了未映射的地址 0”。
