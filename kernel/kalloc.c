@@ -9,6 +9,23 @@
 #include "riscv.h"
 #include "defs.h"
 
+void* superalloc(void);
+void  superfree(void *pa);
+
+// ==== superpage pool (2MB chunks) ====
+struct superrun {
+  struct superrun *next;
+};
+
+static struct {
+  struct spinlock lock;
+  struct superrun *freelist;   // 每个节点代表一个 2MB 大块（对齐）
+  int nfree;
+} sp;
+
+#define NSUPER_RESERVE 8  // 预留的 2MB 大块个数（足够跑测试）
+
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -27,16 +44,81 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  kmem.freelist = 0;
+
+  initlock(&sp.lock, "sp");    // superpage 池
+  sp.freelist = 0;
+  sp.nfree = 0;
   freerange(end, (void*)PHYSTOP);
 }
 
 void
 freerange(void *pa_start, void *pa_end)
 {
-  char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  char *p = (char*)PGROUNDUP((uint64)pa_start);
+  // 先预留若干 2MB 对齐的大块到 superpage 池里
+  uint64 start = (uint64)p;
+  uint64 s = ((start + SUPERPGSIZE - 1) / SUPERPGSIZE) * SUPERPGSIZE;
+  int reserved = 0;
+
+  while (reserved < NSUPER_RESERVE && s + SUPERPGSIZE <= (uint64)pa_end) {
+    // 把 [s, s+2MB) 这 512 个页 **不**放入普通 freelist，而是作为一个 2MB 大块入 super 池
+    acquire(&sp.lock);
+    struct superrun *sr = (struct superrun*)s;
+    sr->next = sp.freelist;
+    sp.freelist = sr;
+    sp.nfree++;
+    release(&sp.lock);
+
+    // 跳过这一段（不调用 kfree）
+    s += SUPERPGSIZE;
+    reserved++;
+  }
+
+  // 其余内存按 4KB 页加入普通 freelist（跳过已预留的 2MB 段）
+  for (; (uint64)p + PGSIZE <= (uint64)pa_end; p += PGSIZE) {
+    uint64 addr = (uint64)p;
+    // 若落在任何已预留 2MB 区间内，跳过
+
+    // 检查该 2MB 区间是不是我们的 super 池成员：方法是看它的首地址是否处于 [start, start+NSUPER*2MB)，且我们预留序列覆盖了它
+    // 简化：只要 addr 位于 [first_reserved, first_reserved + NSUPER_RESERVE*2MB) 且 aligned2m 是 2MB 对齐，就认为在预留段内
+    // 更稳妥：直接判断 addr 是否在任何 sr 起点到 +2MB 之间（成本略大）。因 NSUPER_RESERVE 很小，直接循环即可。
+    int in_reserved = 0;
+    acquire(&sp.lock);
+    for (struct superrun* cur = sp.freelist; cur; cur = cur->next) {
+      uint64 base = (uint64)cur;
+      if (addr >= base && addr < base + SUPERPGSIZE) { in_reserved = 1; break; }
+    }
+    release(&sp.lock);
+    if (in_reserved) continue;
+
     kfree(p);
+  }
+}
+
+// 2MB 分配/释放接口
+void* superalloc(void)
+{
+  acquire(&sp.lock);
+  struct superrun *r = sp.freelist;
+  if (r) {
+    sp.freelist = r->next;
+    sp.nfree--;
+  }
+  release(&sp.lock);
+  return (void*)r;  // 返回 2MB 对齐地址（xv6 习惯：把“物理地址”当作内核直映地址使用）
+}
+
+void superfree(void *pa)
+{
+  if (((uint64)pa % SUPERPGSIZE) != 0)
+    panic("superfree not aligned");
+  acquire(&sp.lock);
+  struct superrun *r = (struct superrun*)pa;
+  r->next = sp.freelist;
+  sp.freelist = r;
+  sp.nfree++;
+  release(&sp.lock);
 }
 
 // Free the page of physical memory pointed at by pa,

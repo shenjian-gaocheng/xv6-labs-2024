@@ -132,6 +132,21 @@ found:
     return 0;
   }
 
+  //change
+  // 分配 usys 页（供 USYSCALL 映射用）
+  p->usys = (struct usyscall*)kalloc();
+  if(p->usys == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  memset(p->usys, 0, PGSIZE);
+
+  // 写入当前进程 pid（KVA 直接可写，不受 PTE_U/W 限制）
+  p->usys->pid = p->pid;
+
+  //end
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -169,6 +184,11 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  //new
+  if(p->usys){
+    kfree((void*)p->usys);
+    p->usys = 0;
+  }
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -202,6 +222,14 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  //change
+    // 用户只读映射 usyscall 页
+  if(mappages(pagetable, USYSCALL, PGSIZE, (uint64)p->usys, PTE_R | PTE_U) < 0){
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+  //end
+  
   return pagetable;
 }
 
@@ -212,6 +240,11 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  //change
+   uvmunmap(pagetable, USYSCALL, 1, 0);
+
+  //end
+
   uvmfree(pagetable, sz);
 }
 

@@ -1,3 +1,7 @@
+#ifdef LAB_PGTBL
+struct usyscall;                // 前置声明，避免头文件包含顺序问题
+#endif
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -104,4 +108,6 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  struct usyscall *usys;   // KVA：本进程的 usyscall 页（页大小）
 };

@@ -237,3 +237,13 @@ void            netinit(void);
 void            net_rx(char *buf, int len);
 
 #endif
+
+// kalloc.c
+void* kalloc(void);
+void  kfree(void *);
+
+// superpage allocator (2MB)
+void* superalloc(void);
+void  superfree(void *);
+
+void uvmclear(pagetable_t, uint64);
