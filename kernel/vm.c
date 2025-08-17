@@ -45,7 +45,7 @@ kvmmake(void)
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
-  
+
   return kpgtbl;
 }
 
@@ -154,7 +154,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
   if(size == 0)
     panic("mappages: size");
-  
+
   a = va;
   last = va + size - PGSIZE;
   for(;;){
@@ -305,8 +305,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 
 // Given a parent process's page table, copy
 // its memory into a child's page table.
-// Copies both the page table and the
-// physical memory.
+// Copies the page table then mark the pte as read-only and cow
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
 int
@@ -315,22 +314,32 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
     pa = PTE2PA(*pte);
+
+    // erase writable bit and set cow bit
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    if (flags & PTE_W){
+      flags &= ~PTE_W;
+      flags |= PTE_COW;
+    }
+
+    // write cow flags to old page table
+    *pte = PA2PTE(pa) | flags;
+
+    // map the identical physical to the new page table
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
+
+    krefer((void *)pa);
   }
   return 0;
 
@@ -345,7 +354,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -366,9 +375,17 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if(va0 >= MAXVA)
       return -1;
     pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
       return -1;
+
+    // copy page if encounter a cow mapping. Note pte may be modified in uvmcow()
+    if ((*pte & PTE_COW) != 0)
+      uvmcow(pagetable, va0, 1);
+
+    // fail if it is still not writable
+    if ((*pte & PTE_W) == 0)
+        return -1;
+
     pa0 = PTE2PA(*pte);
     n = PGSIZE - (dstva - va0);
     if(n > len)
@@ -448,4 +465,53 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// Copies some pages in given page table then free the old pages
+// only used in cow strategy
+int
+uvmcow(pagetable_t pagetable, uint64 va, uint64 npages)
+{
+  if (va >= MAXVA)
+    return -1;
+
+  va = PGROUNDDOWN(va);
+
+  for (uint64 a = va; a < va + npages * PGSIZE; a += PGSIZE){
+    pte_t *pte = walk(pagetable, va, 0);
+
+    if (pte == 0)
+      goto err;
+
+    int flags = PTE_FLAGS(*pte);
+
+    if ((flags & PTE_V) == 0 || (flags & PTE_U) == 0 || (flags & PTE_COW) == 0)
+      goto err;
+
+    // remove cow flag and set writable if cow is set
+    flags &= ~PTE_COW;
+    flags |= PTE_W;
+
+    void *mem = kalloc();
+
+    if (mem == 0)
+      goto err;
+
+    // do we need to check cow bit? no side effect even though to copy a page that is not cow page
+    memmove(mem, (void *)PTE2PA(*pte), PGSIZE);
+
+    // old page will be freed here
+    uvmunmap(pagetable, va, 1, 1);
+
+    if (mappages(pagetable, a, PGSIZE, (uint64)mem, flags) < 0)
+      goto err;
+  }
+
+  return 0;
+
+err:
+  // any page successfully copied will work correctly even though some other failed.
+  // so no need to recovery copied pages
+  // how to handle this error is up to the caller
+  return -1;
 }
