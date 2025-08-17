@@ -1,0 +1,30 @@
+Q: Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+A: In RISC-V specification, register a0~a7 could be used to pass arguments to functions. Instruction
+   li a2,13
+   indicates that register a2 holds 13 in main's call to printf.
+
+Q: Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+A: The second argument passed to printf is held in register a1, then the instruction
+   li	a1,12
+   indicates that the call to f() and g() are inlined to a constant 12 without explicit called by main.
+
+Q: At what address is the function printf located?
+A: Search for function printf we see printf is located at 00000000000006bc <printf>. It's also indicated by the instruction when call printf
+   jal	6bc <printf>
+
+Q: What value is in the register ra just after the jalr to printf in main?
+A: Register ra is set to the address of the next instruction after jal to printf, that is 0x34.
+
+Q: Run the following code.
+     unsigned int i = 0x00646c72;
+   	 printf("H%x Wo%s", 57616, (char *) &i);
+   What is the output? The output depends on that fact that the RISC-V is little-endian. If the RISC-V were instead big-endian what would you set i to in order to yield the same output? Would you need to change 57616 to a different value?
+A: The output is
+     HE110 World
+   In big-endian, just reversely set i equal to 0x726c6400 then we will get the same output.
+   No need to change 57616 since regardless of how we encode the literal value 57616, the system use the same way to decode the value then we always get the same output when format %x.
+
+Q: In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?
+     printf("x=%d y=%d", 3);
+A: In printf asm code we can see that printf save all a1~a7 to program stack then call vprintf regardless of how many arguments we passed to printf.
+   Thus, if the number of arguments we passed to printf is less than that in format string, undefined value in registers will be printed out incorrectly.

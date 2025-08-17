@@ -18,6 +18,28 @@ struct context {
   uint64 s11;
 };
 
+// Saved registers for alarm handling
+struct alarm_context{
+  // caller-saved
+  uint64 t0;
+  uint64 t1;
+  uint64 t2;
+  uint64 t3;
+  uint64 t4;
+  uint64 t5;
+  uint64 t6;
+
+  // function arguments
+  uint64 a0;
+  uint64 a1;
+  uint64 a2;
+  uint64 a3;
+  uint64 a4;
+  uint64 a5;
+  uint64 a6;
+  uint64 a7;
+};
+
 // Per-CPU state.
 struct cpu {
   struct proc *proc;          // The process running on this cpu, or null.
@@ -104,4 +126,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int alarm_interval;          // Sig alarm interval ticks
+  int alarm_elapse;            // elapsed ticks since last alarm
+  uint64 alarm_handler;        // alarm handler address (in user's va)
+  uint64 alarm_epc;            // store previous epc before invoke alarm handler. restore in sigreturn
+  struct alarm_context alarm_context;// context before invoke alarm handler. restore in sigreturn
 };

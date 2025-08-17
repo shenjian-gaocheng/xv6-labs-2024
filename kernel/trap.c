@@ -15,6 +15,7 @@ extern char trampoline[], uservec[], userret[];
 void kernelvec();
 
 extern int devintr();
+static int useralarm(struct proc*);
 
 void
 trapinit(void)
@@ -67,6 +68,11 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+
+    // timer interrupt
+    if (which_dev == 2){
+      useralarm(p);
+    }
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
@@ -216,3 +222,47 @@ devintr()
   }
 }
 
+static int useralarm(struct proc* p){
+  if (p->alarm_interval == 0){
+    return 0;
+  }
+
+  // alarm is handling
+  if (p->alarm_elapse == -1){
+    return 0;
+  }
+  
+  ++p->alarm_elapse;
+
+  if (p->alarm_elapse == p->alarm_interval){
+    // -1 indicates handling
+    p->alarm_elapse = -1;
+    
+    // tricky: to exploit the fact that a callee will preserve callee-saved resgisters, 
+    // let the control return from the alarm handler normally by set ra to epc
+    // then the kernel not need to restore callee-saved registers.
+    p->trapframe->ra = p->trapframe->epc;
+    
+    // user may be interrupted at any time (any execution position) then call to handler
+    // store caller-saved registers since those may be destructed by the handler
+    p->alarm_context.t0 = p->trapframe->t0;
+    p->alarm_context.t1 = p->trapframe->t1;
+    p->alarm_context.t2 = p->trapframe->t2;
+    p->alarm_context.t3 = p->trapframe->t3;
+    p->alarm_context.t4 = p->trapframe->t4;
+    p->alarm_context.t5 = p->trapframe->t5;
+    p->alarm_context.t6 = p->trapframe->t6;
+    p->alarm_context.a0 = p->trapframe->a0;
+    p->alarm_context.a1 = p->trapframe->a1;
+    p->alarm_context.a2 = p->trapframe->a2;
+    p->alarm_context.a3 = p->trapframe->a3;
+    p->alarm_context.a4 = p->trapframe->a4;
+    p->alarm_context.a5 = p->trapframe->a5;
+    p->alarm_context.a6 = p->trapframe->a6;
+    p->alarm_context.a7 = p->trapframe->a7;
+
+    p->trapframe->epc = p->alarm_handler;
+  }
+
+  return 0;
+}
