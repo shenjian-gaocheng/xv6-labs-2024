@@ -35,21 +35,65 @@ struct run {
   struct run *next;
 };
 
+
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} kmem, supermem;
+
+void
+superfree(void *pa)
+{
+  struct run *r;
+
+  if(((uint64)pa % SUPERPGSIZE) != 0 || (char*)pa < (char*)SUPERBASE || (uint64)pa >= PHYSTOP)
+    panic("superfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, SUPERPGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&supermem.lock);
+  r->next = supermem.freelist;
+  supermem.freelist = r;
+  release(&supermem.lock);
+}
+
+// Allocate one 2MB page of physical memory.
+// Returns a pointer that the kernel can use.
+// Returns 0 if the memory cannot be allocated.
+void *
+superalloc(void)
+{
+  struct run *r;
+
+  acquire(&supermem.lock);
+  r = supermem.freelist;
+  if(r)
+    supermem.freelist = r->next;
+  release(&supermem.lock);
+
+  if(r)
+    memset((char*)r, 5, SUPERPGSIZE); // fill with junk
+  return (void*)r;
+}
+
+void
+superinit()
+{
+  initlock(&supermem.lock, "supermem");
+  char *p = (char*) SUPERPGROUNDUP(SUPERBASE);
+  for (; p + SUPERPGSIZE <= (char*)PHYSTOP; p += SUPERPGSIZE)
+    superfree(p);
+}
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  kmem.freelist = 0;
-
-  initlock(&sp.lock, "sp");    // superpage 池
-  sp.freelist = 0;
-  sp.nfree = 0;
-  freerange(end, (void*)PHYSTOP);
+  freerange(end, (void*)SUPERBASE);
+  superinit();
 }
 
 void
@@ -96,30 +140,7 @@ freerange(void *pa_start, void *pa_end)
   }
 }
 
-// 2MB 分配/释放接口
-void* superalloc(void)
-{
-  acquire(&sp.lock);
-  struct superrun *r = sp.freelist;
-  if (r) {
-    sp.freelist = r->next;
-    sp.nfree--;
-  }
-  release(&sp.lock);
-  return (void*)r;  // 返回 2MB 对齐地址（xv6 习惯：把“物理地址”当作内核直映地址使用）
-}
 
-void superfree(void *pa)
-{
-  if (((uint64)pa % SUPERPGSIZE) != 0)
-    panic("superfree not aligned");
-  acquire(&sp.lock);
-  struct superrun *r = (struct superrun*)pa;
-  r->next = sp.freelist;
-  sp.freelist = r;
-  sp.nfree++;
-  release(&sp.lock);
-}
 
 // Free the page of physical memory pointed at by pa,
 // which normally should have been returned by a

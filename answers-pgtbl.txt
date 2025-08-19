@@ -1,0 +1,27 @@
+﻿Q: For every page table entry in the print_pgtbl output, explain what it logically contains and what its permission bits are.
+A: Run pgtbltest then we got the output, most of then entries are zeros and in   valid but some of them exactly mapping a virtual address to the physical address.
+   va 0x0 pte 0x21FC885B pa 0x87F22000 perm 0x5B             // permission: 01011011 -> Valid | Readable | Executable | User | Accessed. This page refers to .text section (e.g., program's instructions)
+   va 0x1000 pte 0x21FC7C1B pa 0x87F1F000 perm 0x1B          // permission: 00011011 -> Valid | Readable | Executable | User. This page refers to .text section which has not been accessed yet
+   va 0x2000 pte 0x21FC7817 pa 0x87F1E000 perm 0x17          // permission: 00010111 -> Valid | Readable | Writable | User. This page refers to .data section (global/non-local static variables and .bss)
+   va 0x3000 pte 0x21FC7407 pa 0x87F1D000 perm 0x7           // permission: 00000111 -> Valid | Readable | Writable. Guard page
+   va 0x4000 pte 0x21FC70D7 pa 0x87F1C000 perm 0xD7          // permission: 11010111 -> Valid | Readable | Writable | User | Accessed | Dirty. This page refers to user stack.
+   va 0x5000 pte 0x0 pa 0x0 perm 0x0
+   va 0x6000 pte 0x0 pa 0x0 perm 0x0
+   va 0x7000 pte 0x0 pa 0x0 perm 0x0
+   va 0x8000 pte 0x0 pa 0x0 perm 0x0
+   va 0x9000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFF6000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFF7000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFF8000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFF9000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFFA000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFFB000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFFC000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFFD000 pte 0x0 pa 0x0 perm 0x0
+   va 0xFFFFE000 pte 0x21FD08C7 pa 0x87F42000 perm 0xC7     // permission: 11000111 -> Valid | Readable | Writable | Accessed | Dirty. This page refers to the trapframe, in which process status will be stored when trapping into the kernel.
+   va 0xFFFFF000 pte 0x2000184B pa 0x80006000 perm 0x4B     // permission: 01001011 -> Valid | Readable | Executable | Accessed. This page refers to the trampoline (e.g., code of the kernel which execute transit into the kernel and back)
+
+Q: Which other xv6 system call(s) could be made faster using this shared page? Explain how.
+A: Those which is read and only read the data shared with kernel could be made faster by this way.
+   For example, when call sbrk() with argument 0, the current heap size will be returned and this data is a read-only data which shared by the kernel. 
+   So it is possible to store/update the heap size in the shared page then user can read this data when call sbrk() with zero and without trapping into the kernel.
